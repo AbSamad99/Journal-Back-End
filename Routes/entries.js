@@ -1,12 +1,15 @@
 // Importing required modules
 const express = require("express");
-const jwt = require("jsonwebtoken");
 const ncrypt = require("ncrypt-js");
 
 // Import Required Schemas
 const EntrySchema = require("../Schemas/EntrySchema");
 
+// Creating the router
 const router = express.Router();
+
+// importing the middleware
+const authenticate = require("../Middleware/authenticate");
 
 // @route: /entries/fetchAll
 // @desc: Get all entries of user
@@ -15,14 +18,14 @@ router.get("/fetchAll", authenticate, async (req, res) => {
     const user = req.user;
 
     // Creating encryption object
-    const ncryptObject = new ncrypt(process.env.NCRYPT_KEY);
+    const ncryptObject = new ncrypt(process.env.NCRYPT_SECRET);
 
     // Fetching entries
     const entries = await EntrySchema.findOne({
       author: { name: user.name, email: user.email },
     }).select("journalEntries");
 
-    if (!entries) return res.status(400).json({ error: "No entries present" });
+    if (!entries) return res.status(404).json({ error: "No entries present" });
     else {
       return res.status(200).json({
         entries: entries.journalEntries.map((entry) => ({
@@ -44,7 +47,7 @@ router.get("/fetchOne", authenticate, async (req, res) => {
     const date = req.body.date;
 
     // Creating encryption object
-    const ncryptObject = new ncrypt(process.env.NCRYPT_KEY);
+    const ncryptObject = new ncrypt(process.env.NCRYPT_SECRET);
 
     // Fetching the entry
     const entry = await EntrySchema.findOne(
@@ -56,7 +59,7 @@ router.get("/fetchOne", authenticate, async (req, res) => {
     );
 
     // Checking if entry is present in db
-    if (!entry) return res.status(401).json({ error: "No such entry present" });
+    if (!entry) return res.status(404).json({ error: "No such entry present" });
     else {
       return res.status(200).json({
         entry: {
@@ -80,7 +83,7 @@ router.post("/save", authenticate, async (req, res) => {
     const { content, date } = req.body;
 
     // Creating encryption object and decrypting data
-    const ncryptObject = new ncrypt(process.env.NCRYPT_KEY);
+    const ncryptObject = new ncrypt(process.env.NCRYPT_SECRET);
 
     // Getting the users journal entries object from database
     let entries = await EntrySchema.findOne({
@@ -115,7 +118,7 @@ router.put("/update", authenticate, async (req, res) => {
     const { date, content } = req.body;
 
     // Creating encryption object
-    const ncryptObject = new ncrypt(process.env.NCRYPT_KEY);
+    const ncryptObject = new ncrypt(process.env.NCRYPT_SECRET);
 
     // Fetching the entry
     const entry = await EntrySchema.findOne(
@@ -127,7 +130,7 @@ router.put("/update", authenticate, async (req, res) => {
     );
 
     // Checking if entry is present in db
-    if (!entry) return res.status(401).json({ error: "No such entry present" });
+    if (!entry) return res.status(404).json({ error: "No such entry present" });
     else {
       // Updating the entry
       await EntrySchema.findOneAndUpdate(
@@ -161,7 +164,7 @@ router.delete("/delete", authenticate, async (req, res) => {
     );
 
     // Checking if entry is present in db
-    if (!entry) return res.status(401).json({ error: "No such entry present" });
+    if (!entry) return res.status(404).json({ error: "No such entry present" });
     else {
       await EntrySchema.findOneAndUpdate(
         { author: { name: user.name, email: user.email } },
@@ -173,36 +176,5 @@ router.delete("/delete", authenticate, async (req, res) => {
     console.error(err);
   }
 });
-
-// @route: No route, helper function
-// @desc: Middleware function to verify the access tokens
-function authenticate(req, res, next) {
-  try {
-    // Getting the accessToken
-    const authHeader = req.headers["authorization"];
-    const accessToken = authHeader && authHeader.split(" ")[1];
-
-    // Verifying accessToken
-    if (!accessToken)
-      return res.status(401).json({ error: "Access token not provided" });
-
-    jwt.verify(
-      accessToken,
-      process.env.ACCESS_TOKEN_SECRET,
-      async (err, user) => {
-        // Verifying that accessToken is valid
-        if (err)
-          return res
-            .status(403)
-            .json({ error: "Invalid access token provided" });
-
-        req.user = user;
-        next();
-      }
-    );
-  } catch (err) {
-    console.error(err);
-  }
-}
 
 module.exports = router;

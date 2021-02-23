@@ -2,11 +2,17 @@
 const express = require("express");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
+const ncrypt = require("ncrypt-js");
 
 // Import Required Schemas
 const UserSchema = require("../Schemas/UserSchema");
 const RefreshTokenSchema = require("../Schemas/RefreshTokenSchema");
 
+// Importing the nodemailer utility
+const sendMail = require("../Utilities/nodemailer");
+
+// Creating the router
 const router = express.Router();
 
 // @route: /authentication/login
@@ -23,7 +29,7 @@ router.post("/login", async (req, res) => {
       email: email,
     });
 
-    if (!user) return res.status(401).json({ error: "User does not exist" });
+    if (!user) return res.status(404).json({ error: "User does not exist" });
 
     const validation = await bcrypt.compare(password, user.password);
 
@@ -147,6 +153,84 @@ router.delete("/logout", async (req, res) => {
     await tempRefreshToken.delete();
 
     return res.status(200).json({ message: "User logout successful" });
+  } catch (err) {
+    console.error(err);
+  }
+});
+
+// @route: /authentication/forgotPassword
+// @desc: Route for making a forgot password request
+router.post("/forgotPassword", async (req, res) => {
+  try {
+    const email = req.body.email;
+    if (!email)
+      return res.status(404).json({ error: "No such email registered" });
+
+    // Creating encryption object
+    const ncryptObject = new ncrypt(process.env.FORGOT_PASSWORD_SECRET);
+
+    const resetPasswordToken = crypto.randomBytes(20).toString("hex");
+
+    // Saving resetPasswordToken to database and setting expiry time
+    await UserSchema.findOneAndUpdate(
+      { email: email },
+      {
+        resetPasswordToken: ncryptObject.encrypt(resetPasswordToken),
+        resetPasswordExpires: Date.now() + 15 * 60 * 1000,
+      }
+    );
+
+    // Sending the mail (BE SURE TO CHANGE THE FINAL THING AFTER FRONT END IS DONE!!!!!!)
+    await sendMail({
+      email: email,
+      subject: "Password Reset",
+      message: `Make a PUT request with your new password in the body to the following url: ${
+        req.protocol
+      }://${req.get(
+        "host"
+      )}/authentication/resetPassword/${resetPasswordToken}`,
+    });
+
+    return res.status(200).json({ message: "Mail has been sent to email id" });
+  } catch (err) {
+    console.error(err);
+  }
+});
+
+// @route: /authentication/resetPassword/:id
+// @desc: Route for resetting the password
+router.put("/resetPassword/:id", async (req, res) => {
+  try {
+    // Getting the encryptedToken and new password
+    const password = req.body.password;
+    const resetPasswordToken = req.params.id;
+    if (!password)
+      return res.status(401).json({ error: "New Password not provided" });
+
+    // Creating encryption object
+    const ncryptObject = new ncrypt(process.env.FORGOT_PASSWORD_SECRET);
+
+    // Fetching appropriate user
+    const user = await UserSchema.findOne({
+      resetPasswordToken: ncryptObject.encrypt(resetPasswordToken),
+    });
+
+    if (!user || user.resetPasswordExpires.getTime() < Date.now())
+      return res.status(404).json({ error: "Invalid password reset link" });
+
+    // Generating new encrypted password
+    const salt = await bcrypt.genSalt(10);
+    const hash = await bcrypt.hash(password, salt);
+
+    // Saving the new password, setting resetPasswordExpires and resetPasswordToken to undefined
+    user.password = hash;
+    user.resetPasswordExpires = undefined;
+    user.resetPasswordToken = undefined;
+
+    // Saving the new password
+    await user.save();
+
+    return res.status(201).json({ message: "password updated sucessfully" });
   } catch (err) {
     console.error(err);
   }
